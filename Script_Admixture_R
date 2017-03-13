@@ -1,0 +1,131 @@
+##### UPDATED on Mar 13th 2017
+
+library(ggplot2)
+
+############################################
+#### POPULATION ASSIGNMENT WITH ADMIXTURE ## 
+############################################
+
+## Preparing the files
+
+###################################
+############# RUN VCFtools ########
+###################################
+
+## Go to directory where are the arquives ".vcf"
+setwd("~/Documents/Analises.Dados/Projetos/Carajasensis_Final/Step1_Structure/Admixture/VCFtools")
+list.files(pattern=".vcf")
+
+## Command Line:
+VCFtools_T <- "vcftools --vcf Icarajasensis_filtered_ldF_Fst_neutral.vcf --plink --out Icarajasensis_filtered_ldF_Admixture"
+system(VCFtools_T) 
+
+###################################
+############# RUN PLINK ###########
+###################################
+setwd("~/Documents/Analises.Dados/Projetos/Carajasensis_Final/Step1_Structure/Admixture/plink")
+
+##The executable file "Plink" should be inside the folder.
+
+## Command Line:
+Plink_L <- "./plink --file Icarajasensis_filtered_ldF_Admixture --make-bed --out Icarajasensis_filtered_ldF_Admixture_F"
+system(Plink_L)
+
+#######################################
+############# RUN ADMIXTURE ###########
+#######################################
+setwd("~/Documents/Analises.Dados/Projetos/Carajasensis_Final/Step1_Structure/Admixture/admixture")
+
+##The executable file "admixture" should be inside the folder.
+
+Admix_K <- "for K in 1 2 3 4 5 6 7 8 9 10;"
+Admix_DO <-  {"do ./admixture --cv=10 Icarajasensis_filtered_ldF_Admixture_F.bed $K | tee log${K}.out; done"}
+AD_run <- paste(Admix_K, Admix_DO)  
+system(AD_run)
+
+###See CVError scores
+Kscores <- "grep -h CV log*.out"
+system(Kscores)
+
+###Plot CVError scores 
+#install.packages('ggplot2',dependencies = TRUE)
+#library(ggplot2)
+
+PlotK <- function(maxK){
+  library(ggplot2)
+  maxK <- as.numeric(maxK)
+  
+  Kscores <- "grep -h CV log*.out"
+  CV <- system(Kscores, intern=TRUE)
+  CV2 <- strsplit(CV, ":")
+  KDF <- data.frame(txt=rep(NA, maxK), CVError=rep(NA, maxK))
+  
+  for(i in 1:maxK){
+    KS <- CV2[[i]][1]
+    VALS <- CV2[[i]][2]
+    KDF[i,1] <- KS
+    KDF[i,2] <- VALS
+  }
+  
+  m <- gregexpr('[0-9]+',KDF[,1])
+  KN <- regmatches(KDF[,1],m)
+  KDF$K <- rep(NA, maxK)
+  
+  for(k in 1:maxK){
+    K2 <- KN[[k]][1]
+    KDF[k,3] <- K2
+  }
+  
+  KDF$K <- as.numeric(KDF$K)
+  KDF2 <- KDF[order(KDF$K, KDF$CVError),]
+  KDF2 <- KDF2[, 2:3]
+  
+  ggplot(KDF2, aes(x=K, y=CVError,group = 1)) + geom_point(size=4) + geom_line() + 
+    ylab("Cross-validation error") +
+    xlab("K") + scale_x_continuous(limits = c(1, maxK), breaks=c(1:maxK)) +
+    theme_grey() + theme(axis.title.y = element_text(size=15, color = "black", face = "bold"),
+                         axis.title.x = element_text(size=20, color = "black", face = "bold"))
+}
+
+
+PlotK(maxK=10)
+
+####################################
+## Bar plot of the admixture #######
+####################################
+list.files(pattern=".Q")
+
+barplotK <- function(Qfile, K){
+  tbl=read.table(Qfile)
+  tbl <- tbl[order(tbl$V1, tbl$V2),]
+  
+  barplot(t(as.matrix(tbl)), col=rainbow(K),
+          xlab="Individual #", ylab="Ancestry", border=NA)
+}
+
+barplotK(Qfile = "Icarajasensis_filtered_ldF_Admixture_F.4.Q", K=4)
+
+#########################################
+## Add pop IDs and Q_Matriz to vcf file #
+#########################################
+
+setwd("~/Documents/Analises.Dados/Projetos/Carajasensis_Final/Step1_Structure")
+
+snps_fil_geno_neutral_fst_lfmn <- vcfLink("Icarajasensis_filtered_ldF_Fst_neutral.vcf")
+snps_fil_geno_neutral_fst_lfmn
+
+tbl=read.table("Admixture/admixture/Icarajasensis_filtered_ldF_Admixture_F.4.Q")
+popIds_ADx = apply(tbl, 1, which.max)
+
+snps_fil_geno_neutral_fst_lfmn@meta$PopID_ADx <- popIds_ADx
+snps_fil_geno_neutral_fst_lfmn@meta
+
+META_q <- snps_fil_geno_neutral_fst_lfmn@meta
+META_q <- cbind(META_q, tbl)
+META_q
+
+## Save new csv file with Q-Matriz (Admixture)
+
+write.csv(META_q, file="Best_Ancestry_Q/Ancestry_ADx.csv", row.names=F)
+
+########################## THE END ########################################
